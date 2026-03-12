@@ -1,0 +1,146 @@
+# research_and_report.yaml
+# ---------------------------------------------------------------------------
+# Example multi-step workflow: search the web for a topic, synthesise the
+# results, and write a structured research report to ./output/report.md.
+#
+# Usage:
+#   local-agent-runner run examples/research_and_report.yaml
+#   local-agent-runner run examples/research_and_report.yaml --sandbox
+# ---------------------------------------------------------------------------
+
+name: Research and Report
+description: >
+  Performs web searches on a given topic, synthesises the retrieved content,
+  and writes a structured Markdown report to ./output/report.md.
+model: llama3
+
+# Global sandbox: allow only HTTPS fetches to approved domains and writes to
+# the output directory.
+sandbox:
+  enabled: false
+  allowed_paths:
+    - "./output"
+    - "/tmp"
+  allowed_commands: []
+  allowed_domains:
+    - "en.wikipedia.org"
+    - "www.wikipedia.org"
+    - "hacker-news.firebaseio.com"
+    - "hn.algolia.com"
+
+# Tools available to steps in this workflow.
+tools:
+  - name: web_fetch
+    type: web_search
+    description: >
+      Fetch the text content of a URL via HTTP GET.
+      Input: { "url": "<full URL>" }
+      Output: the response body as plain text (HTML stripped where possible).
+
+  - name: write_file
+    type: file_write
+    description: >
+      Write text content to a file at the given path, creating parent
+      directories as needed.
+      Input: { "path": "<filepath>", "content": "<text>" }
+      Output: confirmation message.
+
+  - name: read_file
+    type: file_read
+    description: >
+      Read the full text content of a file at the given path.
+      Input: { "path": "<filepath>" }
+      Output: the raw text content of the file.
+
+# Ordered steps.
+steps:
+  - name: gather_sources
+    description: Fetch raw content from multiple URLs related to the topic.
+    prompt: |
+      You are a research assistant.  Your topic is:
+
+        "{research_topic}"
+
+      Search for information by fetching the following URLs one at a time
+      using the 'web_fetch' tool:
+
+        {source_urls}
+
+      For each URL:
+      1. Call web_fetch with that URL.
+      2. Extract the most relevant paragraphs or facts about the topic.
+
+      Compile all extracted facts into a single plain-text document.
+      Do NOT write anything to disk yet — just return the compiled facts as
+      your final response.
+    tools:
+      - web_fetch
+    output_variable: raw_research
+    max_iterations: 8
+    sandbox:
+      enabled: false
+      allowed_domains:
+        - "en.wikipedia.org"
+        - "www.wikipedia.org"
+        - "hacker-news.firebaseio.com"
+        - "hn.algolia.com"
+
+  - name: synthesise_report
+    description: Synthesise gathered research into a structured Markdown report.
+    prompt: |
+      You are a technical writer.  Below is raw research gathered about
+      "{research_topic}":
+
+      ===BEGIN RESEARCH===
+      {raw_research}
+      ===END RESEARCH===
+
+      Write a structured Markdown report with the following sections:
+
+      # Research Report: {research_topic}
+
+      ## Executive Summary
+      (2–3 paragraph overview)
+
+      ## Key Findings
+      (bullet-point list of the most important facts)
+
+      ## Detailed Analysis
+      (prose analysis organised into logical sub-sections)
+
+      ## Sources
+      (list the URLs that were consulted)
+
+      ## Conclusion
+      (1 paragraph)
+
+      Use the 'write_file' tool to save the completed report to
+      './output/report.md'.  Then return the full Markdown text as your
+      response.
+    tools:
+      - write_file
+    output_variable: final_report
+    max_iterations: 5
+    sandbox:
+      enabled: false
+      allowed_paths:
+        - "./output"
+
+  - name: verify_report
+    description: Confirm the report was written and print its path.
+    prompt: |
+      Use the 'read_file' tool to read './output/report.md'.
+      Confirm that the file exists and contains the research report.
+      Return a one-sentence confirmation including the file path and its
+      approximate word count.
+    tools:
+      - read_file
+    output_variable: verification_result
+    max_iterations: 3
+
+# Initial variables available for prompt substitution.
+variables:
+  research_topic: "Large language models and local inference"
+  source_urls: |
+    - https://en.wikipedia.org/wiki/Large_language_model
+    - https://en.wikipedia.org/wiki/Llama_(language_model)

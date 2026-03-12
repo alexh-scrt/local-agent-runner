@@ -1,0 +1,103 @@
+# summarize_files.yaml
+# ---------------------------------------------------------------------------
+# Example workflow: read one or more source files and ask the LLM to produce
+# a structured Markdown summary saved to ./output/summary.md.
+#
+# Usage:
+#   local-agent-runner run examples/summarize_files.yaml
+#   local-agent-runner run examples/summarize_files.yaml --sandbox
+# ---------------------------------------------------------------------------
+
+name: Summarize Files
+description: >
+  Reads a set of source files from a target directory and produces a concise
+  Markdown summary document written to ./output/summary.md.
+model: llama3
+
+# Global sandbox: restrict file access to the project root and output dir.
+sandbox:
+  enabled: false
+  allowed_paths:
+    - "."
+    - "./output"
+    - "/tmp"
+  allowed_commands: []
+  allowed_domains: []
+
+# Tools available to steps in this workflow.
+tools:
+  - name: read_file
+    type: file_read
+    description: >
+      Read the full text content of a file at the given path.
+      Input: { "path": "<filepath>" }
+      Output: the raw text content of the file.
+
+  - name: write_file
+    type: file_write
+    description: >
+      Write text content to a file at the given path, creating parent
+      directories if needed.
+      Input: { "path": "<filepath>", "content": "<text>" }
+      Output: confirmation message.
+
+  - name: list_directory
+    type: shell
+    description: >
+      List the contents of a directory using the 'ls' command.
+      Input: { "command": "ls -1 <directory>" }
+      Output: newline-separated filenames.
+
+# Ordered steps.
+steps:
+  - name: list_target_files
+    description: Discover which files exist in the target directory.
+    prompt: |
+      You are a helpful assistant.  Your task is to list the files that exist
+      in the directory "{target_directory}".
+
+      Use the 'list_directory' tool with the command:
+        ls -1 {target_directory}
+
+      Return only the raw output of the tool — do not add any commentary.
+    tools:
+      - list_directory
+    output_variable: file_listing
+    max_iterations: 3
+
+  - name: read_and_summarize
+    description: Read each discovered file and produce a Markdown summary.
+    prompt: |
+      You are a technical documentation assistant.
+
+      The following files were found in '{target_directory}':
+      {file_listing}
+
+      For each file listed above:
+      1. Use the 'read_file' tool to read its contents.
+      2. Write a concise summary (2–4 sentences) of what the file does or
+         contains.
+
+      After reading all files, compose a single Markdown document with:
+      - A top-level heading: "# File Summary"
+      - One second-level section per file (## filename)
+      - The 2–4 sentence summary under each section heading
+
+      Use the 'write_file' tool to save this document to
+      './output/summary.md'.
+
+      Return the final Markdown text as your response.
+    tools:
+      - read_file
+      - write_file
+    output_variable: summary_markdown
+    max_iterations: 10
+    sandbox:
+      enabled: false
+      allowed_paths:
+        - "."
+        - "./output"
+
+# Initial variables available for prompt substitution.
+variables:
+  target_directory: "."
