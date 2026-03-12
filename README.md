@@ -1,162 +1,114 @@
 # local_agent_runner
 
-A minimal, open-source CLI harness for defining and executing multi-step agentic
-workflows powered entirely by a **local LLM via [Ollama](https://ollama.ai)**.
-No cloud dependencies. No API keys. Just YAML, Python, and your local hardware.
+> Run multi-step AI agents entirely on your own hardware — no API keys, no cloud, no compromise.
 
----
-
-## Features
-
-- **YAML-defined workflows** — declare model, tools, and prompt templates per step
-- **Native Ollama integration** — fully local LLM inference via the Ollama HTTP API
-- **Built-in tool stubs** — file read/write, shell commands, and HTTP-based web search
-- **Sandboxed execution** — configurable allow-lists block dangerous paths/commands
-- **Structured logging** — every LLM response and tool call captured as JSON + Rich terminal output
+`local_agent_runner` is a minimal CLI harness for defining and executing multi-step agentic workflows powered by a local LLM via [Ollama](https://ollama.ai). You describe your workflow in a simple YAML file, and the runner handles prompt chaining, tool execution, and structured logging — all on your local machine. Built for developers who want to prototype and iterate on agentic pipelines without cloud dependencies or vendor lock-in.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-1. **Python 3.11+**
-2. **Ollama** installed and running locally: <https://ollama.ai/download>
-3. At least one model pulled, e.g. `ollama pull llama3`
-
-### Installation
+**Prerequisites:** Python 3.11+, [Ollama](https://ollama.ai) installed and running, and at least one model pulled (e.g. `ollama pull llama3`).
 
 ```bash
-# From source
-git clone https://github.com/example/local_agent_runner.git
+# Install from source
+git clone https://github.com/your-org/local_agent_runner.git
 cd local_agent_runner
 pip install -e .
 
-# Or install with dev dependencies for testing
-pip install -e ".[dev]"
-```
+# Validate a workflow definition
+local-agent-runner validate examples/summarize_files.yaml
 
-### Run Your First Workflow
-
-```bash
-# Run a built-in example
+# Run a workflow
 local-agent-runner run examples/summarize_files.yaml
 
-# Enable sandbox mode (blocks writes outside allowed paths)
-local-agent-runner run examples/research_and_report.yaml --sandbox
+# Run in sandboxed mode (enforces path/command allow-lists)
+local-agent-runner run examples/summarize_files.yaml --sandbox
 
-# Override the Ollama base URL
-local-agent-runner run examples/summarize_files.yaml --ollama-url http://localhost:11434
-
-# Save structured log to a file
-local-agent-runner run examples/summarize_files.yaml --log-file run_log.json
-
-# Increase verbosity
-local-agent-runner run examples/summarize_files.yaml --verbose
+# Check version
+local-agent-runner version
 ```
+
+That's it. If Ollama is running and `llama3` is available, the workflow will execute and write structured logs to your terminal.
 
 ---
 
-## YAML Schema Reference
+## Features
 
-Every workflow is a single YAML file. Here is the complete schema:
+- **YAML-defined workflows** — declare model, tools, and prompt templates per step; chain step outputs as variables into subsequent prompts
+- **Native Ollama integration** — fully local LLM inference via the Ollama HTTP API with zero cloud dependency
+- **Built-in tool stubs** — file read/write, shell command execution, and HTTP-based web search, all callable by the LLM
+- **Sandboxed execution mode** — configurable path, command, and domain allow-lists that block dangerous operations before they run
+- **Structured per-run logging** — every LLM prompt, response, and tool invocation captured as NDJSON on disk and rendered with Rich in the terminal
+
+---
+
+## Usage Examples
+
+### Running the bundled examples
+
+```bash
+# Summarize files in a directory and write output/summary.md
+local-agent-runner run examples/summarize_files.yaml
+
+# Web research pipeline: search → synthesize → write output/report.md
+local-agent-runner run examples/research_and_report.yaml --sandbox
+```
+
+### Writing your own workflow YAML
 
 ```yaml
-# workflow.yaml
-name: string                  # Human-readable workflow name (required)
-description: string           # Optional description
-model: string                 # Ollama model name, e.g. "llama3" (required)
+# my_workflow.yaml
+name: Extract TODOs
+description: Scan source files and extract all TODO comments into a report.
+model: llama3
 
-# Global sandbox settings (can be overridden per step)
 sandbox:
-  enabled: bool               # Default: false
-  allowed_paths:              # List of path prefixes permitted for file I/O
-    - "/tmp"
-    - "./output"
-  allowed_commands:           # List of shell command prefixes permitted
-    - "echo"
-    - "ls"
-  allowed_domains:            # List of domains permitted for web search/fetch
-    - "example.com"
+  enabled: true
+  allowed_paths:
+    - ./src
+    - ./output
+  allowed_commands: []       # no shell commands permitted
+  allowed_domains: []        # no web requests permitted
 
-# Tool definitions available to all steps
-tools:
-  - name: string              # Unique tool identifier
-    description: string       # Shown to the LLM in the system prompt
-    type: file_read | file_write | shell | web_search
-
-# Ordered list of steps
 steps:
-  - name: string              # Step name (required)
-    description: string       # Optional
-    prompt: string            # Prompt template; use {variable} for substitution
-    tools:                    # Subset of top-level tools available in this step
-      - string
-    output_variable: string   # Store LLM response under this variable name
-    max_iterations: int       # Max tool-call rounds per step (default: 5)
-    sandbox:                  # Step-level sandbox override
-      enabled: bool
-      allowed_paths: []
-      allowed_commands: []
-      allowed_domains: []
+  - name: read_source
+    description: Read the main source file.
+    tools:
+      - name: read_file
+        type: file_read
+    prompt: |
+      Read the file at ./src/main.py and return its full contents.
 
-# Initial variables available for prompt substitution
-variables:
-  key: value
+  - name: extract_todos
+    description: Extract TODO comments and write a report.
+    tools:
+      - name: write_file
+        type: file_write
+    prompt: |
+      Here is the source code:
+
+      {{ read_source }}
+
+      Find every TODO comment and write a Markdown checklist to
+      ./output/todos.md.
 ```
-
-### Supported Tool Types
-
-| Type | Description |
-|------|-------------|
-| `file_read` | Read the contents of a file at a given path |
-| `file_write` | Write text content to a file at a given path |
-| `shell` | Execute a shell command and return stdout/stderr |
-| `web_search` | Perform an HTTP GET and return the response body |
-
----
-
-## Example Workflows
-
-### Summarize Files (`examples/summarize_files.yaml`)
-
-Reads one or more source files and asks the LLM to produce a Markdown summary.
 
 ```bash
-local-agent-runner run examples/summarize_files.yaml
+local-agent-runner run my_workflow.yaml
 ```
 
-### Research and Report (`examples/research_and_report.yaml`)
-
-Combines web search and file-write tools to research a topic and save a report.
+### Validating without running
 
 ```bash
-local-agent-runner run examples/research_and_report.yaml --sandbox
+local-agent-runner validate my_workflow.yaml
+# ✓ Workflow 'Extract TODOs' is valid (2 steps, 2 tools)
 ```
 
----
+### Dry-run mode (parse + plan, no LLM calls)
 
-## CLI Reference
-
-```
-usage: local-agent-runner [-h] {run,validate,version} ...
-
-Local Agent Runner — multi-step agentic workflows via Ollama
-
-positional arguments:
-  {run,validate,version}
-    run                 Execute a YAML workflow
-    validate            Validate a YAML workflow without running it
-    version             Print version information
-
-run flags:
-  workflow              Path to the YAML workflow file
-  --sandbox             Enable sandboxed execution (overrides YAML setting)
-  --no-sandbox          Disable sandboxed execution
-  --ollama-url URL      Ollama base URL (default: http://localhost:11434)
-  --log-file FILE       Write structured JSON log to FILE
-  --verbose, -v         Increase output verbosity
-  --dry-run             Parse and validate workflow without calling Ollama
+```bash
+local-agent-runner run my_workflow.yaml --dry-run
 ```
 
 ---
@@ -165,40 +117,105 @@ run flags:
 
 ```
 local_agent_runner/
-├── __init__.py        # Package version
-├── cli.py             # Argparse entry point
-├── config.py          # YAML loader and typed dataclasses
-├── agent.py           # Core agentic loop (Ollama + tool orchestration)
-├── tools.py           # Tool stubs: file I/O, shell, web search
-├── sandbox.py         # Sandbox context with allow-lists
-└── logger.py          # JSON + Rich structured logger
-examples/
-├── summarize_files.yaml
-└── research_and_report.yaml
-tests/
-├── __init__.py
-├── test_config.py
-├── test_tools.py
-└── test_agent.py
+├── pyproject.toml                  # Project metadata, dependencies, CLI entry point
+├── README.md
+│
+├── local_agent_runner/
+│   ├── __init__.py                 # Package initializer; exposes __version__
+│   ├── cli.py                      # Argparse CLI: run / validate / version sub-commands
+│   ├── config.py                   # YAML loader and typed dataclass models
+│   ├── agent.py                    # Core agentic loop + OllamaClient
+│   ├── tools.py                    # Tool stubs: file_read, file_write, shell, web_search
+│   ├── sandbox.py                  # Sandboxed execution context and allow-list enforcement
+│   └── logger.py                   # Structured NDJSON + Rich terminal logger
+│
+├── examples/
+│   ├── summarize_files.yaml        # Read files → produce a Markdown summary
+│   └── research_and_report.yaml   # Web search → synthesize → write report
+│
+└── tests/
+    ├── __init__.py
+    ├── test_config.py              # YAML loading, validation, error handling
+    ├── test_tools.py               # Tool stubs, sandbox rejection, allowed paths
+    ├── test_sandbox.py             # SandboxContext allow-lists and action recording
+    ├── test_logger.py              # RunLogger output, NDJSON format, lifecycle
+    └── test_agent.py               # Agentic loop integration (mocked Ollama)
 ```
 
 ---
 
-## Development
+## Configuration
+
+Workflow files are standard YAML. The top-level fields and their defaults are:
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | ✅ | Human-readable workflow name |
+| `description` | ✅ | Brief description of what the workflow does |
+| `model` | ✅ | Ollama model name to use (e.g. `llama3`, `mistral`) |
+| `steps` | ✅ | Ordered list of step definitions (see below) |
+| `sandbox` | ❌ | Global sandbox settings (can be overridden per step) |
+| `max_iterations` | ❌ | Max tool-call iterations per step (default: `10`) |
+
+**Sandbox block:**
+
+```yaml
+sandbox:
+  enabled: true                    # false = no restrictions (default)
+  allowed_paths:                   # file read/write restricted to these paths
+    - ./data
+    - ./output
+  allowed_commands:                # shell commands restricted to this list
+    - grep
+    - cat
+  allowed_domains:                 # web requests restricted to these domains
+    - api.example.com
+    - en.wikipedia.org
+```
+
+**Step block:**
+
+```yaml
+steps:
+  - name: my_step                  # unique step identifier (used as variable name)
+    description: What this step does
+    tools:                         # tools the LLM may call in this step
+      - name: read_file
+        type: file_read            # file_read | file_write | shell | web_search
+    prompt: |                      # prompt template; use {{ step_name }} for prior outputs
+      Do something useful.
+    sandbox:                       # optional per-step sandbox override
+      allowed_paths:
+        - ./data
+```
+
+**Runtime flags:**
 
 ```bash
-# Install in editable mode with dev extras
+local-agent-runner run <workflow.yaml> [OPTIONS]
+
+  --sandbox          Enable sandboxed execution (overrides workflow setting)
+  --dry-run          Parse and plan the workflow without calling Ollama
+  --log-file PATH    Write structured NDJSON logs to this file
+  --verbose          Print full LLM responses to the terminal
+  --ollama-url URL   Ollama base URL (default: http://localhost:11434)
+```
+
+---
+
+## Running Tests
+
+```bash
 pip install -e ".[dev]"
-
-# Run tests
 pytest
-
-# Run tests with verbose output
-pytest -v
 ```
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+*Built with [Jitter](https://github.com/jitter-ai) — an AI agent that ships code daily.*
